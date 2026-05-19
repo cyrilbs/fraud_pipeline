@@ -11,8 +11,8 @@ services:
       - SPARK_PUBLIC_DNS=localhost
 
     volumes:
-      - /home/cyril/projects/fraud_pipeline:/project
-      - /home/cyril/projects/.ivy2:/project/.ivy2
+      - ../..:/project
+      - ivy-cache:/project/.ivy2
 
     command: >
       /opt/spark/bin/spark-submit
@@ -33,13 +33,16 @@ services:
     container_name: alert-service
 
     volumes:
-      - /home/cyril/projects/fraud_pipeline:/project
+      - ../..:/project
 
     command: >
       bash -c "pip install kafka-python requests && python -u /project/src/app/alert_service.py"
 
     networks:
       - data-platform-net
+
+volumes:
+  ivy-cache:
 
 networks:
   data-platform-net:
