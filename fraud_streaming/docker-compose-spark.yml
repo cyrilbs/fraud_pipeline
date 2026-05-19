@@ -1,12 +1,12 @@
-version: "3.8"
+# Spark cluster only — join data-platform-net (create from repo root or kafka-cassandra stack).
 
 services:
   spark-master:
     image: spark:3.5.7-scala2.12-java17-python3-ubuntu
     container_name: spark-master
     environment:
-      - SPARK_MASTER_HOST=spark-master
-      - SPARK_PUBLIC_DNS=localhost
+      SPARK_MASTER_HOST: spark-master
+      SPARK_PUBLIC_DNS: localhost
     command: >
       bash -c "/opt/spark/sbin/start-master.sh && tail -f /dev/null"
     ports:
@@ -18,11 +18,14 @@ services:
   spark-worker:
     image: spark:3.5.7-scala2.12-java17-python3-ubuntu
     container_name: spark-worker
+    user: root
     depends_on:
       - spark-master
     environment:
-      - SPARK_MASTER=spark://spark-master:7077
-      - SPARK_PUBLIC_DNS=localhost
+      SPARK_MASTER: spark://spark-master:7077
+      SPARK_PUBLIC_DNS: localhost
+    volumes:
+      - .:/streaming
     command: >
       bash -c "/opt/spark/sbin/start-worker.sh spark://spark-master:7077 && tail -f /dev/null"
     ports:

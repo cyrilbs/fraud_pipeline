@@ -3,12 +3,13 @@
 #   docker compose --profile demo up -d   # also start the event producer
 #
 # Train the model first (see README):
-#   mkdir -p src/app/models && cd src/app && python train_model.py
+#   cd fraud_streaming && python src/app/train_model.py
 
 services:
   kafka:
     image: confluentinc/cp-kafka:7.5.0
     container_name: kafka
+    hostname: kafka
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -24,8 +25,27 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
     ports:
       - "9092:9092"
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 5s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
     networks:
       - data-platform-net
+
+  kafka-init:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./fraud_streaming/scripts/kafka-create-topics.sh:/kafka-create-topics.sh:ro
+    entrypoint: ["/bin/bash", "/kafka-create-topics.sh"]
+    networks:
+      - data-platform-net
+    restart: "no"
 
   cassandra:
     image: cassandra:4.1
@@ -43,7 +63,7 @@ services:
     depends_on:
       - cassandra
     volumes:
-      - ./src/app/cassandra/schema.cql:/schema.cql:ro
+      - ./fraud_streaming/src/app/cassandra/schema.cql:/schema.cql:ro
     entrypoint:
       - bash
       - -c
@@ -74,11 +94,15 @@ services:
   spark-worker:
     image: spark:3.5.7-scala2.12-java17-python3-ubuntu
     container_name: spark-worker
+    user: root
     depends_on:
       - spark-master
     environment:
       SPARK_MASTER: spark://spark-master:7077
       SPARK_PUBLIC_DNS: localhost
+    volumes:
+      # Executors run on the worker; parquet writes need this mount too.
+      - ./fraud_streaming:/streaming
     command: >
       bash -c "/opt/spark/sbin/start-worker.sh spark://spark-master:7077 && tail -f /dev/null"
     ports:
@@ -89,15 +113,15 @@ services:
   model-service:
     image: python:3.11-slim
     container_name: model-service
-    working_dir: /project/src/app
+    working_dir: /streaming
     volumes:
-      - .:/project
+      - ./fraud_streaming:/streaming
     command: >
-      bash -c "pip install -q -r model-service-requirements.txt &&
-               python -u model_service_kafka.py"
+      bash -c "pip install -q -r src/app/model-service-requirements.txt &&
+               python -u src/app/model_service_kafka.py"
     depends_on:
-      kafka:
-        condition: service_started
+      kafka-init:
+        condition: service_completed_successfully
     networks:
       - data-platform-net
 
@@ -109,23 +133,29 @@ services:
     environment:
       SPARK_PUBLIC_DNS: localhost
     volumes:
-      - .:/project
-      - ivy-cache:/project/.ivy2
+      - ./fraud_streaming:/streaming
+      - ivy-cache:/streaming/.ivy2
     depends_on:
-      - spark-master
-      - spark-worker
-      - kafka
-      - cassandra-init
+      spark-master:
+        condition: service_started
+      spark-worker:
+        condition: service_started
+      kafka-init:
+        condition: service_completed_successfully
+      cassandra-init:
+        condition: service_completed_successfully
+      model-service:
+        condition: service_started
     command: >
       /opt/spark/bin/spark-submit
       --master spark://spark-master:7077
       --conf spark.ui.host=0.0.0.0
       --conf spark.driver.host=spark-driver
       --conf spark.driver.bindAddress=0.0.0.0
-      --conf spark.jars.ivy=/project/.ivy2
+      --conf spark.jars.ivy=/streaming/.ivy2
       --conf spark.cassandra.connection.host=cassandra
       --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,com.datastax.spark:spark-cassandra-connector_2.12:3.5.0
-      /project/src/app/fraud_streaming.py
+      /streaming/src/app/fraud_streaming.py
     networks:
       - data-platform-net
 
@@ -133,13 +163,13 @@ services:
     image: python:3.11-slim
     container_name: alert-service
     volumes:
-      - .:/project
+      - ./fraud_streaming:/streaming
     command: >
       bash -c "pip install -q kafka-python requests &&
-               python -u /project/src/app/alert_service.py"
+               python -u /streaming/src/app/alert_service.py"
     depends_on:
-      kafka:
-        condition: service_started
+      kafka-init:
+        condition: service_completed_successfully
     networks:
       - data-platform-net
 
@@ -148,16 +178,17 @@ services:
     image: python:3.11-slim
     container_name: fraud-producer
     environment:
-      PYTHONPATH: /project/src
+      PYTHONPATH: /streaming/src
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     volumes:
-      - .:/project
-    working_dir: /project
+      - ./fraud_streaming:/streaming
+    working_dir: /streaming
     command: >
       bash -c "pip install -q kafka-python &&
                python -u src/app/fraud_producer.py"
     depends_on:
-      kafka:
-        condition: service_started
+      kafka-init:
+        condition: service_completed_successfully
       model-service:
         condition: service_started
     networks:
@@ -165,6 +196,7 @@ services:
 
 networks:
   data-platform-net:
+    name: data-platform-net
     driver: bridge
 
 volumes:

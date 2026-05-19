@@ -1,0 +1,22 @@
+# Explore parquet lake produced by fraud_streaming.
+# From this directory:
+#   docker compose run --rm dbt debug
+#   docker compose run --rm dbt run
+#   docker compose run --rm dbt test
+
+services:
+  dbt:
+    build: .
+    volumes:
+      - .:/usr/app
+      - ../fraud_streaming/data/parquet:/data/parquet:ro
+    working_dir: /usr/app
+    environment:
+      DBT_PROFILES_DIR: /usr/app
+    networks:
+      - data-platform-net
+
+networks:
+  data-platform-net:
+    external: true
+    name: data-platform-net

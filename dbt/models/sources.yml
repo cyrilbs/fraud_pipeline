@@ -1,0 +1,8 @@
+version: 2
+
+sources:
+  - name: streaming_lake
+    description: Parquet files written by fraud_streaming Spark job
+    tables:
+      - name: fraud_decisions
+        description: BLOCK/ALLOW decisions appended per micro-batch

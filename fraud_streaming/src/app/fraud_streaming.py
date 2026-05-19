@@ -1,13 +1,18 @@
+import os
+
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, from_json, to_timestamp, lit, to_date
 from pyspark.sql.types import StructType, StringType
 from pyspark.sql.functions import min, max
 
 fraud_input_topic = "tpc_fraud_decisions"
+checkpoint_location = os.getenv(
+    "SPARK_CHECKPOINT_DIR", "/streaming/.checkpoint/fraud_decisions"
+)
 fraud_output_topic = "tpc_alerts_aggregated"
 key_space = "mykeyspace"
 cass_table_name = "fraud"
-parquet_output_path = "/project/data/parquet/fraud_decisions"
+parquet_output_path = "/streaming/data/parquet/fraud_decisions"
 
 def log_row(row):
     import logging
@@ -44,7 +49,6 @@ def write_parquet_for_analytics(df, epoch_id, logger):
 
 def process_batch(df, epoch_id):
     import logging
-    from pyspark.sql import SparkSession
 
     logger = logging.getLogger("streaming")
 
@@ -166,7 +170,7 @@ parsed_df = parsed_df.withColumn(
 query = parsed_df.writeStream \
     .trigger(processingTime="5 seconds") \
     .foreachBatch(process_batch) \
-    .option("checkpointLocation", "/tmp/spark_checkpoint_fraud") \
+    .option("checkpointLocation", checkpoint_location) \
     .start()
 
 query.awaitTermination()

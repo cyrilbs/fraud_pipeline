@@ -1,0 +1,80 @@
+# Application services for the streaming pipeline.
+# Expects infrastructure from the repo root: docker compose up -d
+# Or use modular stacks below with a shared network:
+#   docker network create data-platform-net
+#   docker compose -f docker-compose-kafka-cassandra.yml up -d
+#   docker compose -f docker-compose-spark.yml up -d
+#   docker compose up -d
+
+services:
+  model-service:
+    image: python:3.11-slim
+    container_name: model-service
+    working_dir: /streaming
+    volumes:
+      - .:/streaming
+    command: >
+      bash -c "pip install -q -r src/app/model-service-requirements.txt &&
+               python -u src/app/model_service_kafka.py"
+    networks:
+      - data-platform-net
+
+  spark-driver:
+    image: spark:3.5.7-scala2.12-java17-python3-ubuntu
+    container_name: spark-driver
+    hostname: spark-driver
+    user: root
+    environment:
+      SPARK_PUBLIC_DNS: localhost
+    volumes:
+      - .:/streaming
+      - ivy-cache:/streaming/.ivy2
+    depends_on:
+      model-service:
+        condition: service_started
+    command: >
+      /opt/spark/bin/spark-submit
+      --master spark://spark-master:7077
+      --conf spark.ui.host=0.0.0.0
+      --conf spark.driver.host=spark-driver
+      --conf spark.driver.bindAddress=0.0.0.0
+      --conf spark.jars.ivy=/streaming/.ivy2
+      --conf spark.cassandra.connection.host=cassandra
+      --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,com.datastax.spark:spark-cassandra-connector_2.12:3.5.0
+      /streaming/src/app/fraud_streaming.py
+    networks:
+      - data-platform-net
+
+  alert-service:
+    image: python:3.11-slim
+    container_name: alert-service
+    volumes:
+      - .:/streaming
+    command: >
+      bash -c "pip install -q kafka-python requests &&
+               python -u /streaming/src/app/alert_service.py"
+    networks:
+      - data-platform-net
+
+  fraud-producer:
+    profiles: [demo]
+    image: python:3.11-slim
+    container_name: fraud-producer
+    environment:
+      PYTHONPATH: /streaming/src
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    volumes:
+      - .:/streaming
+    working_dir: /streaming
+    command: >
+      bash -c "pip install -q kafka-python &&
+               python -u src/app/fraud_producer.py"
+    networks:
+      - data-platform-net
+
+networks:
+  data-platform-net:
+    external: true
+
+volumes:
+  ivy-cache:

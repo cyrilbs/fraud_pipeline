@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+.ivy2/
+data/parquet/
+.checkpoint/
+*.iml

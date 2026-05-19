@@ -1,0 +1,8 @@
+fraud_analytics:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: /usr/app/target/warehouse.duckdb
+      extensions:
+        - parquet
