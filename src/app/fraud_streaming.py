@@ -1,5 +1,5 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, from_json, to_timestamp, lit
+from pyspark.sql.functions import col, from_json, to_timestamp, lit, to_date
 from pyspark.sql.types import StructType, StringType
 from pyspark.sql.functions import min, max
 
@@ -7,6 +7,7 @@ fraud_input_topic = "tpc_fraud_decisions"
 fraud_output_topic = "tpc_alerts_aggregated"
 key_space = "mykeyspace"
 cass_table_name = "fraud"
+parquet_output_path = "/project/data/parquet/fraud_decisions"
 
 def log_row(row):
     import logging
@@ -25,6 +26,21 @@ def debug_batch(df, epoch_id):
     logger = logging.getLogger("streaming")
     logger.warning(f"Batch {epoch_id}")
     df.show(20, truncate=False)
+
+def write_parquet_for_analytics(df, epoch_id, logger):
+    if df.isEmpty():
+        return
+
+    analytics_df = (
+        df.drop("partition", "offset")
+        .withColumn("batch_id", lit(epoch_id))
+        .withColumn("event_date", to_date(col("timestamp")))
+    )
+
+    analytics_df.write.mode("append").partitionBy("event_date").parquet(
+        parquet_output_path
+    )
+    logger.warning(f"[Batch {epoch_id}] Appended batch to {parquet_output_path}")
 
 def process_batch(df, epoch_id):
     import logging
@@ -47,6 +63,8 @@ def process_batch(df, epoch_id):
         )
 
     debug_batch(df, epoch_id)
+
+    write_parquet_for_analytics(df, epoch_id, logger)
 
     # --- FILTER BLOCK ---
     df_block = df.filter(col("decision") == "BLOCK")
@@ -111,9 +129,9 @@ schema = StructType() \
     .add("transaction_id", StringType()) \
     .add("fraud_probability", StringType()) \
     .add("decision", StringType()) \
-    .add("timestamp", StringType()) \
- \
-    # Read stream from Kafka
+    .add("timestamp", StringType())
+
+# Read stream from Kafka
 kafka_df = spark.readStream \
     .format("kafka") \
     .option("kafka.bootstrap.servers", "kafka:9092") \
