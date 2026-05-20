@@ -1,20 +1,13 @@
-# Base image
 FROM python:3.11-slim
 
-# Set working directory
-WORKDIR /app
+WORKDIR /streaming
 
-# Copy only requirements first (for better caching)
-COPY model-service-requirements.txt .
+# Keep dependency layer cacheable and reused by all app services.
+COPY src/app/model-service-requirements.txt /tmp/model-service-requirements.txt
+RUN pip install --no-cache-dir -r /tmp/model-service-requirements.txt requests
 
-# Install dependencies
-RUN pip install --no-cache-dir -r model-service-requirements.txt
+# Runtime code and model artifact used by model-service/producer/alerts.
+COPY src /streaming/src
+COPY models /streaming/models
 
-# Copy application code
-COPY ../.. .
-
-# Set PYTHONPATH
-ENV PYTHONPATH=/app
-
-# Run the service
-CMD ["python", "-u", "model_service_kafka.py"]
+ENV PYTHONPATH=/streaming/src

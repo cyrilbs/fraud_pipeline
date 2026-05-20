@@ -111,14 +111,13 @@ services:
       - data-platform-net
 
   model-service:
-    image: python:3.11-slim
+    build:
+      context: ./fraud_streaming
+      dockerfile: src/app/Dockerfile
+    image: fraud-streaming-app:local
     container_name: model-service
     working_dir: /streaming
-    volumes:
-      - ./fraud_streaming:/streaming
-    command: >
-      bash -c "pip install -q -r src/app/model-service-requirements.txt &&
-               python -u src/app/model_service_kafka.py"
+    command: ["python", "-u", "src/app/model_service_kafka.py"]
     depends_on:
       kafka-init:
         condition: service_completed_successfully
@@ -160,13 +159,9 @@ services:
       - data-platform-net
 
   alert-service:
-    image: python:3.11-slim
+    image: fraud-streaming-app:local
     container_name: alert-service
-    volumes:
-      - ./fraud_streaming:/streaming
-    command: >
-      bash -c "pip install -q kafka-python requests &&
-               python -u /streaming/src/app/alert_service.py"
+    command: ["python", "-u", "/streaming/src/app/alert_service.py"]
     depends_on:
       kafka-init:
         condition: service_completed_successfully
@@ -175,17 +170,13 @@ services:
 
   fraud-producer:
     profiles: [demo]
-    image: python:3.11-slim
+    image: fraud-streaming-app:local
     container_name: fraud-producer
     environment:
       PYTHONPATH: /streaming/src
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-    volumes:
-      - ./fraud_streaming:/streaming
     working_dir: /streaming
-    command: >
-      bash -c "pip install -q kafka-python &&
-               python -u src/app/fraud_producer.py"
+    command: ["python", "-u", "src/app/fraud_producer.py"]
     depends_on:
       kafka-init:
         condition: service_completed_successfully
