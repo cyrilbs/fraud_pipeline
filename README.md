@@ -73,7 +73,7 @@ Alternative: run only the producer without Compose (Kafka and model-service must
 docker run --rm -it \
   --name kafka-fraud-producer \
   --network data-platform-net \
-  -v /home/cyril/projects/fraud_pipeline/fraud_streaming/src:/app \
+  -v "$PWD/fraud_streaming/src:/app" \
   -w /app \
   -e PYTHONPATH=/app \
   -e KAFKA_BOOTSTRAP_SERVERS=kafka:9092 \
