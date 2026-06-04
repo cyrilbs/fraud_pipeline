@@ -9,6 +9,7 @@ fraud_input_topic = "tpc_fraud_decisions"
 checkpoint_location = os.getenv(
     "SPARK_CHECKPOINT_DIR", "/streaming/.checkpoint/fraud_decisions"
 )
+fail_on_data_loss = os.getenv("SPARK_FAIL_ON_DATA_LOSS", "false")
 fraud_output_topic = "tpc_alerts_aggregated"
 key_space = "mykeyspace"
 cass_table_name = "fraud"
@@ -141,6 +142,7 @@ kafka_df = spark.readStream \
     .option("kafka.bootstrap.servers", "kafka:9092") \
     .option("subscribe", fraud_input_topic) \
     .option("startingOffsets", "latest") \
+    .option("failOnDataLoss", fail_on_data_loss) \
     .option("maxOffsetsPerTrigger", 100) \
     .load()
 #q1 = debug_stream(kafka_df, "kafka_df")
@@ -174,4 +176,3 @@ query = parsed_df.writeStream \
     .start()
 
 query.awaitTermination()
-

@@ -1,0 +1,17 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: model-service
+    static_configs:
+      - targets: ["model-service:9101"]
+
+  - job_name: alert-service
+    static_configs:
+      - targets: ["alert-service:9102"]
+
+  - job_name: fraud-producer
+    static_configs:
+      - targets: ["fraud-producer:9103"]
+

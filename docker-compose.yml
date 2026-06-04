@@ -117,7 +117,11 @@ services:
     image: fraud-streaming-app:local
     container_name: model-service
     working_dir: /streaming
+    environment:
+      METRICS_PORT: 9101
     command: ["python", "-u", "src/app/model_service_kafka.py"]
+    ports:
+      - "9101:9101"
     depends_on:
       kafka-init:
         condition: service_completed_successfully
@@ -161,7 +165,11 @@ services:
   alert-service:
     image: fraud-streaming-app:local
     container_name: alert-service
+    environment:
+      METRICS_PORT: 9102
     command: ["python", "-u", "/streaming/src/app/alert_service.py"]
+    ports:
+      - "9102:9102"
     depends_on:
       kafka-init:
         condition: service_completed_successfully
@@ -175,13 +183,47 @@ services:
     environment:
       PYTHONPATH: /streaming/src
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      METRICS_PORT: 9103
     working_dir: /streaming
     command: ["python", "-u", "src/app/fraud_producer.py"]
+    ports:
+      - "9103:9103"
     depends_on:
       kafka-init:
         condition: service_completed_successfully
       model-service:
         condition: service_started
+    networks:
+      - data-platform-net
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - data-platform-net
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
     networks:
       - data-platform-net
 
@@ -193,3 +235,5 @@ networks:
 volumes:
   cassandra-data:
   ivy-cache:
+  prometheus-data:
+  grafana-data:

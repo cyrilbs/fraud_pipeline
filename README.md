@@ -1,6 +1,6 @@
 # Fraud Pipeline
 
-Monorepo for a real-time fraud detection platform and local analytics on the streaming parquet lake.
+Real-time fraud detection app and local analytics on the streaming parquet lake.
 
 ## Layout
 
@@ -40,7 +40,7 @@ flowchart LR
 
 ## Quick start
 
-### 1. Train the fraud model
+### 1. Train the fraud model to produce fraud_model.pkl
 
 ```bash
 cd fraud_streaming
@@ -84,6 +84,8 @@ docker run --rm -it \
 - Spark UI: http://localhost:8080 (master), http://localhost:8081 (worker)
 - Kafka: `localhost:9092`
 - Cassandra: `localhost:9042`
+- Prometheus: http://localhost:9090
+- Grafana: http://localhost:3000
 
 ### 3. Explore parquet with dbt
 
@@ -114,6 +116,29 @@ Set `SLACK_WEBHOOK` in `fraud_streaming/src/app/alert_service.py`. Do not commit
 | `tpc_fraud_decisions` | `model_service_kafka` | `fraud_streaming`, `alert_service` |
 | `tpc_alerts_aggregated` | `fraud_streaming` | `alert_service` |
 
+## Observability
+
+The root Compose stack includes Prometheus and Grafana. Prometheus scrapes the Python app services on these metrics endpoints:
+
+| Service | Metrics URL |
+|---------|-------------|
+| `model-service` | http://localhost:9101/metrics |
+| `alert-service` | http://localhost:9102/metrics |
+| `fraud-producer` | http://localhost:9103/metrics |
+
+Start the stack and optional demo producer:
+
+```bash
+docker compose up -d
+docker compose --profile demo up -d
+```
+
+Open Prometheus at http://localhost:9090 to query metrics such as `fraud_processed_messages_total`, `fraud_produced_messages_total`, `fraud_failed_messages_total`, and `fraud_message_processing_latency_seconds`.
+
+Open Grafana at http://localhost:3000 and sign in with `admin` / `admin`. The `Fraud Pipeline` dashboard is provisioned automatically under the `Fraud Pipeline` folder.
+
+![Fraud Pipeline Grafana dashboard](docs/images/grafana-fraud-pipeline-dashboard.png)
+
 Quick test: consume messages from Kafka inside the broker container:
 
 ```bash
@@ -133,6 +158,8 @@ USE mykeyspace;
 
 desc tables;
 desc table fraud;
+
+select count(*) from fraud;
 ```
 
 ## Modular compose
@@ -173,6 +200,18 @@ docker compose up -d spark-driver
 ```
 
 Ensure the demo producer (or model service) is sending events so `tpc_fraud_decisions` receives data.
+
+### Spark: Kafka offset was changed or data may have been lost
+
+This happens when Spark's checkpoint still contains old Kafka offsets but the Kafka topic was reset, deleted, or recreated. The local Spark job defaults `SPARK_FAIL_ON_DATA_LOSS=false` so the stream can recover from this during development, but clearing the stale checkpoint is the clean reset:
+
+```bash
+docker compose stop spark-driver
+rm -rf fraud_streaming/.checkpoint/fraud_decisions
+docker compose up -d spark-driver
+```
+
+For stricter production-like behavior, set `SPARK_FAIL_ON_DATA_LOSS=true` for `spark-driver`.
 
 ### Spark: `Mkdirs failed` when writing parquet
 
