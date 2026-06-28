@@ -228,8 +228,6 @@ docker compose --profile demo up -d   # optional demo producer
 - Spark UI: http://localhost:8080 (master), http://localhost:8081 (worker)
 - Kafka: `localhost:9092`
 - Cassandra: `localhost:9042`
-- Prometheus: http://localhost:9090
-- Grafana: http://localhost:3000
 
 > **Note about docker image**
 > 
