@@ -1,29 +1,30 @@
 # Fraud Pipeline
 
-Real-time fraud detection app and local analytics on the streaming parquet lake. 
+Real-time fraud detection pipeline and local analytics on the streaming parquet lake. 
+
 Stack: Kafka, Spark Structured Streaming, scikit-learn, Cassandra, Parquet, DuckDB, dbt, Prometheus, Grafana
 
 ## Context
 
-Use case: monitoring potentially fraudulent transactions
-Business need: quickly detect risky transactions
-Two levels of response:
-transaction-level decision: ALLOW or BLOCK
-aggregated alert: fraud spike over a micro-window
-Key concerns: low latency, traceability, historical analysis, supervision
+- Use case: monitoring potentially fraudulent transactions
+- Business need: quickly detect risky transactions
+- Two levels of response are expected:
+  - transaction-level decision: ALLOW or BLOCK
+  - aggregated alert: fraud spike over a micro-window
+- Key concerns: low latency, traceability, historical analysis, supervision
 
 ## Architecture
 
 ![Architecture diagram](docs/images/architecture_overview.png)
 
-Step 1: generate a JSON transaction
-Step 2: publish it to tpc_fraud
-Step 3: score it with ML and publish to tpc_fraud_decisions
-Step 4: process it with Spark every 5 seconds
-Step 5: store BLOCK decisions in Cassandra
-Step 6: store all decisions in Parquet
-Step 7: publish alerts to tpc_alerts_aggregated
-Step 8: Slack, dbt, Grafana
+- Step 1: generate a JSON transaction
+- Step 2: publish it to tpc_fraud
+- Step 3: score it with ML and publish to tpc_fraud_decisions
+- Step 4: process it with Spark every 5 seconds
+- Step 5: store BLOCK decisions in Cassandra
+- Step 6: store all decisions in Parquet
+- Step 7: publish alerts to tpc_alerts_aggregated
+- Step 8: Slack, dbt, Grafana
 
 ## Technical choices: batch versus streaming
 
@@ -41,29 +42,31 @@ Step 8: Slack, dbt, Grafana
 
 ![Parquet technical choice diagram](docs/images/architecture_overview.png)
 
-Parquet is a columnar format
-Benefits:
-efficient compression
-selective column reads
-embedded schema
-compatible with Spark, DuckDB, dbt, DBeaver
+- Parquet is a columnar format
+- Benefits:
+- efficient compression
+- selective column reads
+- embedded schema
+- compatible with Spark, DuckDB, dbt, DBeaver
+
 In this project:
-output: /streaming/data/parquet/fraud_decisions
-partitioning by event_date
-local analytics usage
+
+- output: /streaming/data/parquet/fraud_decisions
+- partitioning by event_date
+- local analytics usage
 
 ## ML scoring service
 
 ![ML scoring service diagram](docs/images/architecture_overview.png)
 
-File: model_service_kafka.py
-Loads models/fraud_model.pkl with joblib
-Features used:
-amount
-country_risk
-Model: RandomForestClassifier
-Threshold: fraud_threshold_model = 0.8
-Output: BLOCK if probability > 0.8, otherwise ALLOW
+- File: model_service_kafka.py
+- Loads models/fraud_model.pkl with joblib
+- Features used:
+    - amount 
+    - country_risk
+- Model: RandomForestClassifier
+- Threshold: fraud_threshold_model = 0.8
+- Output: BLOCK if probability > 0.8, otherwise ALLOW
 
 ## Technical choices: Cassandra
 
@@ -129,30 +132,32 @@ docker compose --profile demo up -d   # optional demo producer
 - Prometheus: http://localhost:9090
 - Grafana: http://localhost:3000
 
-Note about docker image:
-Python app services (`model-service`, `alert-service`, `fraud-producer`) now use
+> **Note about docker image**
+> 
+>Python app services (`model-service`, `alert-service`, `fraud-producer`) now use
 the image built from `fraud_streaming/src/app/Dockerfile` for faster startup
 (dependencies preinstalled).
+> 
+>To rebuild when Python code changes:
+>```bash
+>docker compose build model-service
+>```
 
-To rebuild when Python code changes:
-```bash
-docker compose build model-service
-```
-
-Note about starting producer container:
-to run only the producer without Compose (Kafka and model-service must already be running):
-
-```bash
-docker run --rm -it \
-  --name kafka-fraud-producer \
-  --network data-platform-net \
-  -v "$PWD/fraud_streaming/src:/app" \
-  -w /app \
-  -e PYTHONPATH=/app \
-  -e KAFKA_BOOTSTRAP_SERVERS=kafka:9092 \
-  python:3.11 \
-  bash -c "pip install kafka-python && python app/fraud_producer.py"
-```
+> **Note about starting producer container**
+>
+>to run only the producer without Compose (Kafka and model-service must already be running):
+>
+>```bash
+>docker run --rm -it \
+>  --name kafka-fraud-producer \
+>  --network data-platform-net \
+>  -v "$PWD/fraud_streaming/src:/app" \
+>  -w /app \
+>  -e PYTHONPATH=/app \
+>  -e KAFKA_BOOTSTRAP_SERVERS=kafka:9092 \
+>  python:3.11 \
+>  bash -c "pip install kafka-python && python app/fraud_producer.py"
+>```
 
 ### 3. Checks
 
@@ -180,6 +185,7 @@ select count(*) from fraud;
 ```
 
 To check Spark:
+
 ```bash
 cd fraud_streaming
 export PYTHONPATH=src
@@ -188,13 +194,11 @@ python src/app/validate_spark.py
 
 ### 4. Slack alerts
 
-Create a Slack app first (for example `fraud_detection`) at
-[https://api.slack.com/apps](https://api.slack.com/apps), then create an Incoming
-Webhook URL for your channel.
-Slack web client is available at [https://app.slack.com/client](https://app.slack.com/client).
+- Create a Slack app first (for example `fraud_detection`) at [https://api.slack.com/apps](https://api.slack.com/apps)
+- then create an Incoming Webhook URL for your channel
+- Slack web client is available at [https://app.slack.com/client](https://app.slack.com/client).
 
-Set `SLACK_WEBHOOK` in your shell or a local `.env` file before starting
-`alert-service`.
+Set `SLACK_WEBHOOK` in your shell or a local `.env` file before starting `alert-service`.
 
 ```bash
 export SLACK_WEBHOOK="https://hooks.slack.com/services/..."
@@ -231,6 +235,7 @@ The root Compose stack includes Prometheus and Grafana. Prometheus scrapes the P
 Open Prometheus at http://localhost:9090 to query metrics such as `fraud_processed_messages_total`, `fraud_produced_messages_total`, `fraud_failed_messages_total`, and `fraud_message_processing_latency_seconds`.
 
 Open Grafana at http://localhost:3000 and sign in with `admin` / `admin`.*
+
 The `Fraud Pipeline` dashboard is provisioned automatically under the `Fraud Pipeline` folder.
 
 ![Fraud Pipeline Grafana dashboard](docs/images/grafana-fraud-pipeline-dashboard.png)

@@ -25,8 +25,7 @@ METRICS_PORT = int(os.getenv("METRICS_PORT", "9102"))
 ALERT_COOLDOWN = 10
 last_alert_time = 0
 
-# your webhook here
-SLACK_WEBHOOK = "REMOVED"
+SLACK_WEBHOOK = os.getenv("SLACK_WEBHOOK", "").strip()
 
 def should_alert():
     global last_alert_time
@@ -58,12 +57,17 @@ def handle_aggregated_alert(data):
 
 
 def send_slack(message):
+    if not SLACK_WEBHOOK or SLACK_WEBHOOK == "REMOVED":
+        logger.warning("Slack webhook is not configured; skipping alert")
+        return
+
     try:
-        requests.post(
+        response = requests.post(
             SLACK_WEBHOOK,
             json={"text": message},
             timeout=2,
         )
+        response.raise_for_status()
         observe_alert_sent(SERVICE_NAME)
     except Exception as e:
         observe_failed_message(SERVICE_NAME)

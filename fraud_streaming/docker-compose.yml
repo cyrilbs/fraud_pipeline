@@ -47,6 +47,8 @@ services:
   alert-service:
     image: fraud-streaming-app:local
     container_name: alert-service
+    environment:
+      SLACK_WEBHOOK: ${SLACK_WEBHOOK:-}
     command: ["python", "-u", "/streaming/src/app/alert_service.py"]
     networks:
       - data-platform-net

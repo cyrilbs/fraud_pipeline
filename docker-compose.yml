@@ -167,6 +167,7 @@ services:
     container_name: alert-service
     environment:
       METRICS_PORT: 9102
+      SLACK_WEBHOOK: ${SLACK_WEBHOOK:-}
     command: ["python", "-u", "/streaming/src/app/alert_service.py"]
     ports:
       - "9102:9102"
