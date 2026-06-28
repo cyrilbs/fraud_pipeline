@@ -1,5 +1,7 @@
 # Fraud Pipeline
 
+[Français](README.fr.md)
+
 Real-time fraud detection pipeline and local analytics on the streaming parquet lake. 
 
 Stack: Kafka, Spark Structured Streaming, scikit-learn, Cassandra, Parquet, DuckDB, dbt, Prometheus, Grafana
