@@ -1,44 +1,108 @@
 # Fraud Pipeline
 
-Real-time fraud detection app and local analytics on the streaming parquet lake.
+Real-time fraud detection app and local analytics on the streaming parquet lake. 
+Stack: Kafka, Spark Structured Streaming, scikit-learn, Cassandra, Parquet, DuckDB, dbt, Prometheus, Grafana
 
-## Layout
+## Context
+
+Use case: monitoring potentially fraudulent transactions
+Business need: quickly detect risky transactions
+Two levels of response:
+transaction-level decision: ALLOW or BLOCK
+aggregated alert: fraud spike over a micro-window
+Key concerns: low latency, traceability, historical analysis, supervision
+
+## Architecture
+
+![Architecture diagram](archi.png)
+
+Step 1: generate a JSON transaction
+Step 2: publish it to tpc_fraud
+Step 3: score it with ML and publish to tpc_fraud_decisions
+Step 4: process it with Spark every 5 seconds
+Step 5: store BLOCK decisions in Cassandra
+Step 6: store all decisions in Parquet
+Step 7: publish alerts to tpc_alerts_aggregated
+Step 8: Slack, dbt, Grafana
+
+## Technical choices: batch versus streaming
+
+![Batch versus streaming diagram](docs/images/archi.png)
+
+## Technical choices: Kafka
+
+![Kafka technical choice diagram](docs/images/archi.png)
+
+## Technical choices: Spark
+
+![Spark technical choice diagram](docs/images/archi.png)
+
+## Technical choices: Parquet
+
+![Parquet technical choice diagram](docs/images/archi.png)
+
+Parquet is a columnar format
+Benefits:
+efficient compression
+selective column reads
+embedded schema
+compatible with Spark, DuckDB, dbt, DBeaver
+In this project:
+output: /streaming/data/parquet/fraud_decisions
+partitioning by event_date
+local analytics usage
+
+## ML scoring service
+
+![ML scoring service diagram](docs/images/archi.png)
+
+File: model_service_kafka.py
+Loads models/fraud_model.pkl with joblib
+Features used:
+amount
+country_risk
+Model: RandomForestClassifier
+Threshold: fraud_threshold_model = 0.8
+Output: BLOCK if probability > 0.8, otherwise ALLOW
+
+## Technical choices: Cassandra
+
+![Cassandra technical choice diagram](docs/images/archi.png)
+
+## Technical choices: Prometheus and Grafana
+
+![Prometheus and Grafana technical choice diagram](docs/images/archi.png)
+
+## Project
 
 ```
 fraud_pipeline/
 ├── docker-compose.yml       # Full stack (infra + streaming apps)
+├── README.md                # Main project documentation
+├── docs/images/archi.png    # Architecture and technical choice diagrams
 ├── fraud_streaming/         # Kafka, Spark, model, alerts, parquet lake
-│   ├── src/
-│   ├── models/
+│   ├── src/app/             # Producer, model service, Spark job, alerts, observability
+│   ├── src/lib/             # Shared helpers
+│   ├── models/              # Trained fraud model artifact
+│   ├── scripts/             # Kafka topic creation script
+│   ├── tests/               # Unit tests
+│   ├── docker-compose-kafka-cassandra.yml
+│   ├── docker-compose-spark.yml
 │   └── docker-compose.yml   # App services only (modular)
-└── dbt/                     # DuckDB + dbt on local parquet
-    └── docker-compose.yml
+├── dbt/                     # DuckDB + dbt on local parquet
+│   ├── models/staging/      # Staging models over parquet data
+│   ├── models/marts/        # Analytics marts
+│   ├── dbt_project.yml
+│   ├── profiles.yml
+│   └── docker-compose.yml
+├── monitoring/              # Prometheus and Grafana provisioning
+│   ├── prometheus/
+│   └── grafana/
+├── docs/                    # Presentation and generated documentation images
+└── scripts/                 # Utility scripts, including presentation generation
 ```
 
-## Architecture
-
-```mermaid
-flowchart LR
-  Producer[fraud_producer] -->|tpc_fraud| Kafka[(Kafka)]
-  Kafka --> Model[model_service_kafka]
-  Model -->|tpc_fraud_decisions| Kafka
-  Kafka --> Spark[fraud_streaming]
-  Spark --> Cassandra[(Cassandra)]
-  Spark --> Parquet[(parquet lake)]
-  Spark -->|tpc_alerts_aggregated| Kafka
-  Kafka --> Alerts[alert_service]
-  Parquet --> Dbt[dbt + DuckDB]
-```
-
-| Component | Location |
-|-----------|----------|
-| Event producer | `fraud_streaming/src/app/fraud_producer.py` |
-| Model service | `fraud_streaming/src/app/model_service_kafka.py` |
-| Spark streaming | `fraud_streaming/src/app/fraud_streaming.py` |
-| Alerts | `fraud_streaming/src/app/alert_service.py` |
-| Analytics | `dbt/` |
-
-## Quick start
+## Starting everything
 
 ### 1. Train the fraud model to produce fraud_model.pkl
 
@@ -59,15 +123,24 @@ docker compose up -d
 docker compose --profile demo up -d   # optional demo producer
 ```
 
+- Spark UI: http://localhost:8080 (master), http://localhost:8081 (worker)
+- Kafka: `localhost:9092`
+- Cassandra: `localhost:9042`
+- Prometheus: http://localhost:9090
+- Grafana: http://localhost:3000
+
+Note about docker image:
 Python app services (`model-service`, `alert-service`, `fraud-producer`) now use
 the image built from `fraud_streaming/src/app/Dockerfile` for faster startup
-(dependencies preinstalled). Rebuild when Python code changes:
+(dependencies preinstalled).
 
+To rebuild when Python code changes:
 ```bash
 docker compose build model-service
 ```
 
-Alternative: run only the producer without Compose (Kafka and model-service must already be running):
+Note about starting producer container:
+to run only the producer without Compose (Kafka and model-service must already be running):
 
 ```bash
 docker run --rm -it \
@@ -81,72 +154,16 @@ docker run --rm -it \
   bash -c "pip install kafka-python && python app/fraud_producer.py"
 ```
 
-- Spark UI: http://localhost:8080 (master), http://localhost:8081 (worker)
-- Kafka: `localhost:9092`
-- Cassandra: `localhost:9042`
-- Prometheus: http://localhost:9090
-- Grafana: http://localhost:3000
+### 3. Checks
 
-### 3. Explore parquet with dbt
-
-After the stream has written data to `fraud_streaming/data/parquet/`:
-
-```bash
-cd dbt
-docker compose run --rm dbt deps
-docker compose run --rm dbt run
-```
-
-See [dbt/README.md](dbt/README.md) for details.
-
-### 4. Slack alerts
-
-Create a Slack app first (for example `fraud_detection`) at
-[https://api.slack.com/apps](https://api.slack.com/apps), then create an Incoming
-Webhook URL for your channel.
-Slack web client is available at [https://app.slack.com/client](https://app.slack.com/client).
-
-Set `SLACK_WEBHOOK` in `fraud_streaming/src/app/alert_service.py`. Do not commit webhook URLs.
-
-## Kafka topics
-
-| Topic | Producer | Consumer |
-|-------|----------|----------|
-| `tpc_fraud` | `fraud_producer` | `model_service_kafka` |
-| `tpc_fraud_decisions` | `model_service_kafka` | `fraud_streaming`, `alert_service` |
-| `tpc_alerts_aggregated` | `fraud_streaming` | `alert_service` |
-
-## Observability
-
-The root Compose stack includes Prometheus and Grafana. Prometheus scrapes the Python app services on these metrics endpoints:
-
-| Service | Metrics URL |
-|---------|-------------|
-| `model-service` | http://localhost:9101/metrics |
-| `alert-service` | http://localhost:9102/metrics |
-| `fraud-producer` | http://localhost:9103/metrics |
-
-Start the stack and optional demo producer:
-
-```bash
-docker compose up -d
-docker compose --profile demo up -d
-```
-
-Open Prometheus at http://localhost:9090 to query metrics such as `fraud_processed_messages_total`, `fraud_produced_messages_total`, `fraud_failed_messages_total`, and `fraud_message_processing_latency_seconds`.
-
-Open Grafana at http://localhost:3000 and sign in with `admin` / `admin`. The `Fraud Pipeline` dashboard is provisioned automatically under the `Fraud Pipeline` folder.
-
-![Fraud Pipeline Grafana dashboard](docs/images/grafana-fraud-pipeline-dashboard.png)
-
-Quick test: consume messages from Kafka inside the broker container:
+To check that tpc_fraud is correctly populated into kafka:
 
 ```bash
 docker exec -it kafka bash
 kafka-console-consumer --bootstrap-server localhost:9092 --topic tpc_fraud --from-beginning
 ```
 
-## Cassandra quick checks
+Cassandra quick checks:
 
 Use `cqlsh` in the Cassandra container to verify schema is created:
 
@@ -162,27 +179,76 @@ desc table fraud;
 select count(*) from fraud;
 ```
 
-## Modular compose
-
-**Streaming apps only** (`fraud_streaming/`):
-
-```bash
-docker network create data-platform-net
-cd fraud_streaming
-docker compose -f docker-compose-kafka-cassandra.yml up -d
-docker compose -f docker-compose-spark.yml up -d
-docker compose up -d
-```
-
-**dbt only** (`dbt/`): requires parquet data and the `data-platform-net` network (created by root `docker compose up`).
-
-## Local development
-
+To check Spark:
 ```bash
 cd fraud_streaming
 export PYTHONPATH=src
 python src/app/validate_spark.py
 ```
+
+### 4. Slack alerts
+
+Create a Slack app first (for example `fraud_detection`) at
+[https://api.slack.com/apps](https://api.slack.com/apps), then create an Incoming
+Webhook URL for your channel.
+Slack web client is available at [https://app.slack.com/client](https://app.slack.com/client).
+
+Set `SLACK_WEBHOOK` in your shell or a local `.env` file before starting
+`alert-service`.
+
+```bash
+export SLACK_WEBHOOK="https://hooks.slack.com/services/..."
+docker compose up -d --force-recreate alert-service
+```
+
+To disable Slack if needed:
+
+```bash
+unset SLACK_WEBHOOK
+docker compose up -d --force-recreate alert-service
+```
+
+### 5. Explore parquet with dbt
+
+After checking the stream has written data to `fraud_streaming/data/parquet/` we can start Dbt:
+
+```bash
+cd dbt
+docker compose run --rm dbt deps
+docker compose run --rm dbt run
+```
+
+### 6. Observability
+
+The root Compose stack includes Prometheus and Grafana. Prometheus scrapes the Python app services on these metrics endpoints:
+
+| Service | Metrics URL |
+|---------|-------------|
+| `model-service` | http://localhost:9101/metrics |
+| `alert-service` | http://localhost:9102/metrics |
+| `fraud-producer` | http://localhost:9103/metrics |
+
+Open Prometheus at http://localhost:9090 to query metrics such as `fraud_processed_messages_total`, `fraud_produced_messages_total`, `fraud_failed_messages_total`, and `fraud_message_processing_latency_seconds`.
+
+Open Grafana at http://localhost:3000 and sign in with `admin` / `admin`.*
+The `Fraud Pipeline` dashboard is provisioned automatically under the `Fraud Pipeline` folder.
+
+![Fraud Pipeline Grafana dashboard](docs/images/grafana-fraud-pipeline-dashboard.png)
+
+### 7.Stopping services
+
+```bash
+docker compose --profile demo down
+docker compose down
+```
+
+## Technical choices: Spark in depth
+
+## Limitations
+
+## Improvements
+
+## Conclusion
 
 ## Troubleshooting
 
@@ -219,11 +285,4 @@ Parquet files are written by Spark **executors** on `spark-worker`, not only on 
 
 ```bash
 docker compose up -d --force-recreate spark-worker spark-driver
-```
-
-## Stopping services
-
-```bash
-docker compose --profile demo down
-docker compose down
 ```
