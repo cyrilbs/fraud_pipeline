@@ -135,6 +135,26 @@ In this project, Spark writes `BLOCK` decisions to Cassandra while all decisions
 
 This design keeps Cassandra focused on serving operational fraud data, while historical analysis is handled by formats and tools better suited for scans and aggregations.
 
+## Technical choices: Dbt
+
+![Dbt technical choice diagram](docs/images/dbt.png)
+
+dbt is used to structure the analytical layer of the project. It reads the Parquet files written by the streaming pipeline and transforms them into reusable SQL models.
+
+In this project, dbt is not part of the real-time decision path. It runs after data has already been produced by Kafka, processed by Spark, and stored in Parquet. Its role is to make
+the historical decision data easier to query, document, and extend.
+
+The dbt layer is useful because it brings software engineering practices to analytics:
+
+- SQL transformations are versioned in the repository.
+- Models are organized into staging and marts.
+- Business definitions can be centralized and reused.
+- Tests and documentation can be added as the analytics layer grows.
+
+DuckDB is used as the local analytical engine behind dbt. This keeps the setup lightweight while still allowing efficient queries over Parquet files.
+
+In short, dbt turns the raw streaming output into a cleaner analytical layer for reporting, exploration, and future dashboarding.
+
 ## Technical choices: Prometheus and Grafana
 
 ![Prometheus and Grafana technical choice diagram](docs/images/prom_grafana.png)
