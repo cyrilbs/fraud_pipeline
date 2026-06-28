@@ -31,7 +31,7 @@ Stack: Kafka, Spark Structured Streaming, scikit-learn, Cassandra, Parquet, Duck
 ![Batch versus streaming diagram](docs/images/batch_versus_streaming.png)
 
 This project uses streaming because fraud detection is time-sensitive. A batch pipeline would be useful for historical reporting, model evaluation, or daily aggregates, but it would
-detect risky transactions too late for operational blocking.
+detect risky transactions too late for operational blocking. In this image everything except dbt+DuckDB is streaming.
 
 Streaming allows each transaction to be evaluated as soon as it is produced, then routed to downstream systems with low latency:
 
