@@ -14,7 +14,7 @@ Key concerns: low latency, traceability, historical analysis, supervision
 
 ## Architecture
 
-![Architecture diagram](archi.png)
+![Architecture diagram](docs/images/architecture_overview.png)
 
 Step 1: generate a JSON transaction
 Step 2: publish it to tpc_fraud
@@ -27,19 +27,19 @@ Step 8: Slack, dbt, Grafana
 
 ## Technical choices: batch versus streaming
 
-![Batch versus streaming diagram](docs/images/archi.png)
+![Batch versus streaming diagram](docs/images/architecture_overview.png)
 
 ## Technical choices: Kafka
 
-![Kafka technical choice diagram](docs/images/archi.png)
+![Kafka technical choice diagram](docs/images/architecture_overview.png)
 
 ## Technical choices: Spark
 
-![Spark technical choice diagram](docs/images/archi.png)
+![Spark technical choice diagram](docs/images/architecture_overview.png)
 
 ## Technical choices: Parquet
 
-![Parquet technical choice diagram](docs/images/archi.png)
+![Parquet technical choice diagram](docs/images/architecture_overview.png)
 
 Parquet is a columnar format
 Benefits:
@@ -54,7 +54,7 @@ local analytics usage
 
 ## ML scoring service
 
-![ML scoring service diagram](docs/images/archi.png)
+![ML scoring service diagram](docs/images/architecture_overview.png)
 
 File: model_service_kafka.py
 Loads models/fraud_model.pkl with joblib
@@ -67,11 +67,11 @@ Output: BLOCK if probability > 0.8, otherwise ALLOW
 
 ## Technical choices: Cassandra
 
-![Cassandra technical choice diagram](docs/images/archi.png)
+![Cassandra technical choice diagram](docs/images/architecture_overview.png)
 
 ## Technical choices: Prometheus and Grafana
 
-![Prometheus and Grafana technical choice diagram](docs/images/archi.png)
+![Prometheus and Grafana technical choice diagram](docs/images/architecture_overview.png)
 
 ## Project
 
