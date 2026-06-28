@@ -28,36 +28,81 @@ Stack: Kafka, Spark Structured Streaming, scikit-learn, Cassandra, Parquet, Duck
 
 ## Technical choices: batch versus streaming
 
-![Batch versus streaming diagram](docs/images/architecture_overview.png)
+![Batch versus streaming diagram](docs/images/batch_versus_streaming.png)
+
+This project uses streaming because fraud detection is time-sensitive. A batch pipeline would be useful for historical reporting, model evaluation, or daily aggregates, but it would
+detect risky transactions too late for operational blocking.
+
+Streaming allows each transaction to be evaluated as soon as it is produced, then routed to downstream systems with low latency:
+
+- Kafka decouples producers and consumers.
+- The ML service scores transactions continuously.
+- Spark Structured Streaming aggregates decisions over short windows.
+- Cassandra stores blocked transactions for fast lookup.
+- Parquet keeps the full decision history for analytics and dbt.
+
+Batch processing is still useful in this architecture for offline analysis, dashboarding, and model improvement. The pipeline therefore combines both patterns: streaming for real-
+time decisions, batch-style analytics on Parquet for historical insight.
 
 ## Technical choices: Kafka
 
-![Kafka technical choice diagram](docs/images/architecture_overview.png)
+![Kafka technical choice diagram](docs/images/kafka.png)
+
+Kafka is used as the central event backbone of the pipeline. It decouples transaction production, fraud scoring, streaming aggregation, and alerting so each service can evolve and
+restart independently.
+
+The pipeline uses separate topics for each stage:
+
+- `tpc_fraud` receives raw transaction events.
+- `tpc_fraud_decisions` receives scored decisions from the ML service.
+- `tpc_alerts_aggregated` receives aggregated fraud alerts from Spark.
+
+This topic separation keeps responsibilities clear and makes the data flow easier to observe and debug. Kafka also provides buffering: if one consumer is temporarily unavailable,
+events can remain available in the topic and be processed when the service comes back.
+
+Kafka is therefore a good fit for this project because fraud detection needs low-latency event delivery, replayability for debugging, and loose coupling between producer, model
+service, Spark processing, and alerting.
 
 ## Technical choices: Spark
 
-![Spark technical choice diagram](docs/images/architecture_overview.png)
+![Spark technical choice diagram](docs/images/spark.png)
 
-## Technical choices: Parquet
+Spark Structured Streaming is used to process scored fraud decisions continuously. It reads events from Kafka, applies streaming transformations, and writes the results to
+operational and analytical storage.
 
-![Parquet technical choice diagram](docs/images/architecture_overview.png)
+In this pipeline, Spark has three main roles:
 
-- Parquet is a columnar format
-- Benefits:
-- efficient compression
-- selective column reads
-- embedded schema
-- compatible with Spark, DuckDB, dbt, DBeaver
+- Consume scored decisions from `tpc_fraud_decisions`.
+- Persist blocked transactions to Cassandra for operational lookup.
+- Write all fraud decisions to Parquet for historical analysis with DuckDB and dbt.
 
-In this project:
+Spark is useful here because it provides a unified model for streaming and batch-style processing. The same concepts used for analytical transformations, such as schemas,
+aggregations, and windowing, can be applied to live event streams.
 
-- output: /streaming/data/parquet/fraud_decisions
-- partitioning by event_date
-- local analytics usage
+The pipeline uses micro-batches to balance latency and reliability. This makes the system responsive enough for fraud monitoring while keeping processing deterministic, traceable,
+and easier to debug locally.
+
+
+## Technical choices: Parquet versus Avro
+
+![Parquet technical choice diagram](docs/images/parquet.png)
+
+Parquet and Avro are both common formats in data pipelines, but they serve different purposes.
+
+Avro is row-oriented and well suited for event transport, schema evolution, and message serialization. It is a good fit when records are exchanged between services, especially with
+Kafka and a schema registry.
+
+Parquet is column-oriented and optimized for analytical workloads. It is more efficient when queries read only a subset of columns, aggregate large datasets, or scan historical data.
+
+In this project, Parquet is used for the decision history because the data is later queried by DuckDB, dbt, and analytical tools. Typical questions focus on trends, counts, ratios,
+and time windows, which benefit from Parquet's columnar layout and compression.
+
+Avro would be a strong option for formalizing Kafka message contracts in a production version of the pipeline. For the local project, JSON keeps Kafka messages easy to inspect, while
+Parquet provides an efficient format for analytics.
 
 ## ML scoring service
 
-![ML scoring service diagram](docs/images/architecture_overview.png)
+![ML scoring service diagram](docs/images/ml.png)
 
 - File: model_service_kafka.py
 - Loads models/fraud_model.pkl with joblib
@@ -70,11 +115,45 @@ In this project:
 
 ## Technical choices: Cassandra
 
-![Cassandra technical choice diagram](docs/images/architecture_overview.png)
+![Cassandra technical choice diagram](docs/images/cassandra.png)
+
+Cassandra is used to store blocked transactions produced by the streaming pipeline. These records are operational data: they represent transactions that may require fast lookup,
+investigation, or downstream action.
+
+>**Note**
+> - Operational data: used now, by the application or operators, for action.
+> - Analytical data: used later, for reporting, exploration, metrics, and trends.
+
+Cassandra fits this use case because it is designed for high write throughput and low-latency reads at scale. In a fraud detection context, the system may need to ingest many
+decisions continuously while keeping recent blocked transactions quickly accessible.
+
+In this project, Spark writes `BLOCK` decisions to Cassandra while all decisions are also stored in Parquet for analytics. This separates operational storage from analytical storage:
+
+- Cassandra keeps the actionable subset of decisions.
+- Parquet keeps the complete historical dataset.
+- dbt and DuckDB query Parquet instead of putting analytical load on Cassandra.
+
+This design keeps Cassandra focused on serving operational fraud data, while historical analysis is handled by formats and tools better suited for scans and aggregations.
 
 ## Technical choices: Prometheus and Grafana
 
-![Prometheus and Grafana technical choice diagram](docs/images/architecture_overview.png)
+![Prometheus and Grafana technical choice diagram](docs/images/prom_grafana.png)
+
+Prometheus and Grafana are used to observe the behavior of the fraud detection pipeline while it is running.
+
+Prometheus collects metrics exposed by the Python services, such as the number of produced messages, processed decisions, failed messages, and processing latency. These metrics make
+it possible to detect operational issues such as stopped consumers, increasing error rates, or abnormal processing delays.
+
+Grafana provides dashboards on top of Prometheus. It makes the pipeline easier to monitor visually by showing counters, rates, and latency trends in one place.
+
+In this project, observability is useful for both technical and business monitoring:
+
+- Technical monitoring checks whether the services are running correctly.
+- Business monitoring checks whether fraud-related activity changes unexpectedly.
+- Latency metrics help verify that the pipeline remains close to real time.
+- Failure metrics help identify broken integrations or malformed messages.
+
+This makes Prometheus and Grafana a good fit for supervising a streaming fraud pipeline, where both reliability and timely detection matter.
 
 ## Project
 
@@ -247,13 +326,64 @@ docker compose --profile demo down
 docker compose down
 ```
 
-## Technical choices: Spark in depth
+## A bit more about Spark
 
-## Limitations
+Spark applications are coordinated by a driver and executed by workers through executors.
+
+The driver is the main process of a Spark application. It builds the execution plan, coordinates the job, and sends tasks to executors. In this project, the streaming job defined in
+`fraud_streaming.py` acts as the Spark application.
+
+The master belongs to the Spark cluster manager. It tracks available worker nodes and assigns resources to applications. In the local Docker setup, the Spark master provides the
+cluster entry point used by the streaming job.
+
+Workers are the machines or containers that provide CPU and memory to the cluster. They do not directly execute the application logic themselves; they host executors.
+
+Executors are processes launched on workers for a specific Spark application. They run the tasks sent by the driver, keep intermediate data in memory when needed, and write results
+to external systems such as Cassandra or Parquet.
+
+In short:
+
+- The driver plans and coordinates the Spark application.
+- The master manages cluster resources.
+- Workers provide compute capacity.
+- Executors run the actual tasks on the workers.
+
+For this project, this model allows the fraud streaming job to consume Kafka events, process them in micro-batches, and write results continuously while keeping the execution
+distributed and observable through the Spark UI.
+
+## Project limitations
+
+This project is designed as a local end-to-end fraud detection pipeline, so some production concerns are simplified.
+
+The Kafka messages use JSON, which is easy to inspect and debug, but does not enforce strong schemas like Avro or Protobuf with a schema registry. The ML model is also intentionally
+simple and uses a limited set of features, so it should be seen as a demonstration model rather than a production fraud model.
+
+The infrastructure runs locally with Docker Compose. This makes the project easy to reproduce, but it does not include production-grade deployment features such as autoscaling, high
+availability, secret management, access control, or disaster recovery.
+
+Observability is present through Prometheus and Grafana, but alerting rules and incident workflows are limited.
 
 ## Improvements
 
+A production version could introduce stronger message contracts with Avro or Protobuf and a schema registry. This would make Kafka events safer to evolve and easier to validate
+between services.
+
+The fraud model could also be improved with more realistic features, better training data, model versioning, and monitoring for drift. A dedicated model registry could help track
+deployed models and rollback if needed.
+
+The infrastructure could be deployed on Kubernetes or a managed platform, with proper secrets, resource limits, scaling policies, and persistent storage. Additional tests could cover
+integration scenarios across Kafka, Spark, Cassandra, and the model service.
+
+Observability could be extended with alerting rules, service-level indicators, and dashboards focused on both technical health and fraud-specific business metrics.
+
 ## Conclusion
+
+This project demonstrates how a real-time fraud detection pipeline can combine event streaming, machine learning, operational storage, analytical storage, and observability.
+
+Kafka provides the event backbone, the ML service scores transactions, Spark processes decisions continuously, Cassandra stores actionable blocked transactions, and Parquet keeps the
+full history available for analytics with DuckDB and dbt.
+
+The result is a compact but complete architecture that shows the main building blocks of a modern streaming data platform.
 
 ## Troubleshooting
 
